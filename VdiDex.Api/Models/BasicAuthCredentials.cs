@@ -1,0 +1,8 @@
+namespace VdiDex.Api.Models;
+
+public sealed class BasicAuthCredentials
+{
+    public const string SectionName = "BasicAuth";
+    public string Username { get; set; } = string.Empty;
+    public string Password { get; set; } = string.Empty;
+}

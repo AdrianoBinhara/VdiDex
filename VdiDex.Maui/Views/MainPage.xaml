@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:vm="clr-namespace:VdiDex.Maui.ViewModels"
+             x:Class="VdiDex.Maui.Views.MainPage"
+             x:DataType="vm:MainViewModel"
+             Title="VDI DEX Uploader">
+
+    <ScrollView>
+        <VerticalStackLayout Padding="24" Spacing="16" VerticalOptions="Center">
+
+            <Label Text="DEX Uploader"
+                   FontSize="28"
+                   FontAttributes="Bold"
+                   HorizontalOptions="Center" />
+
+            <Label Text="Send a hard-coded DEX report to the VDI API."
+                   HorizontalOptions="Center"
+                   TextColor="Gray" />
+
+            <Button Text="Send Machine A"
+                    Command="{Binding SendMachineACommand}"
+                    HeightRequest="56" />
+
+            <Button Text="Send Machine B"
+                    Command="{Binding SendMachineBCommand}"
+                    HeightRequest="56" />
+
+            <Button Text="Clear Tables"
+                    Command="{Binding ClearTablesCommand}"
+                    HeightRequest="56"
+                    BackgroundColor="DarkRed"
+                    TextColor="White" />
+
+            <ActivityIndicator IsRunning="{Binding IsBusy}"
+                               IsVisible="{Binding IsBusy}"
+                               HorizontalOptions="Center" />
+
+            <Border Padding="12"
+                    Stroke="LightGray"
+                    StrokeThickness="1">
+                <Label Text="{Binding StatusMessage}"
+                       LineBreakMode="WordWrap" />
+            </Border>
+
+        </VerticalStackLayout>
+    </ScrollView>
+
+</ContentPage>

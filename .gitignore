@@ -1,0 +1,23 @@
+# Secrets / local config
+.env
+VdiDex.Api/appsettings.Development.json
+
+# Session exports
+2026-*.txt
+
+# Build output
+bin/
+obj/
+
+# IDE
+.idea/
+.vs/
+.vscode/
+*.user
+
+# OS
+.DS_Store
+Thumbs.db
+
+# MAUI
+*.binlog
