@@ -223,4 +223,4 @@ docker cp vdidex-sqlserver:/var/opt/mssql/backup/VdiDex.bak VdiDex.Api/Database/
 
 - **Basic auth credentials** (`vendsys` / `NFsZGmHAGWJSZ#RuvdiV`) are committed in `appsettings.json` — this follows the assignment spec, which explicitly fixed these values and allowed them to live in config.
 - **SQL Server SA password** is kept out of source control: set in `.env` (ignored by git) and consumed by `docker-compose.yml`; the API reads its connection string from `appsettings.Development.json` (also ignored, generated from the `.example` template).
-- The `DELETE /vdi-dex` endpoint is destructive. Remove or gate behind an admin role before production use.
+- The `DELETE /vdi-dex` endpoint is destructive.
