@@ -2,9 +2,6 @@
 .env
 VdiDex.Api/appsettings.Development.json
 
-# Session exports
-2026-*.txt
-
 # Build output
 bin/
 obj/

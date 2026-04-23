@@ -1,0 +1,647 @@
+
+❯ Let's create the API using ASP .NET Core 9 and following the best practices   
+  like we did for MAUI. If you are not sure about any implemenation best        
+  practice, ask me before continuing                                            
+
+⏺ Questions before scaffold:
+
+  1. Project name/location? VdiDex.Api under
+  /Users/binhara/Development/VdiDex/VdiDex.Api, add to existing .sln?
+  2. SQL host on Mac? LocalDb = Windows only. Options:
+    - Azure SQL Edge (Docker, ARM-compatible)
+    - SQL Server 2022 Linux container (x64/Rosetta)
+    - mssql-server in Docker
+  Which?
+  3. Data access? Spec asks stored procs. Pick:
+    - ADO.NET raw (SqlConnection + SqlCommand)
+    - Dapper (thin, fast, easy sproc calls)
+    - EF Core (heavier, sproc via FromSqlRaw/ExecuteSqlRaw)
+  Recommend Dapper — minimal, proc-friendly, fast.
+  4. Parse strategy? Two paths in spec:
+    - C# parser + SaveDEXMeter + SaveDEXLaneMeter sprocs (TVP for lanes)
+    - T-SQL SaveDex parses raw DEX
+  Recommend C# + 2 sprocs + TVP — cleaner, testable, faster inserts.
+  5. Auth impl? Basic auth:
+    - Custom AuthenticationHandler<BasicAuthenticationSchemeOptions> (idiomatic,
+   integrates [Authorize])
+    - Middleware check
+  Recommend AuthenticationHandler.
+  6. Project layout? Follow MAUI pattern:
+  VdiDex.Api/
+    Interfaces/   (IDexParser, IDexRepository)
+    Services/     (DexParser, DexRepository)
+    Models/       (DexMeter, DexLaneMeter, ApiSettings, BasicAuthOptions)
+    Auth/         (BasicAuthHandler)
+    Endpoints/    (DexEndpoints.cs — MapPost extension)
+    Database/     (schema.sql, sprocs.sql, seed, .bak output)
+    Program.cs
+    appsettings.json
+  6. OK?
+  7. DB schema confirm? Spec says:
+    - DEXMeter (parent): Id PK, Serial (ID101), PaidVends (VA101), CreatedAt
+    - DEXLaneMeter (child): Id PK, DexMeterId FK, LaneId (PA101), Product
+  (PA102), Price (PA201), Vends (PA202)
+  Add Machine column ("A"/"B") + ReceivedAt on parent? Any extra fields?
+  8. Concurrency? Spec says "concurrent ingest." Fine with default async
+  pipeline + connection-per-request (SQL Server handles it). Add rate limiting?
+  Queue? Or trust SQL + async?
+  9. .bak how? Create DB, run schema + sprocs, BACKUP DATABASE via T-SQL script,
+   commit .bak to repo under VdiDex.Api/Database/. OK?
+  10. Logging/observability? Default ILogger + console, or Serilog?
+
+  Answer these, I scaffold.
+
+❯ 1 - Yes, add it to the existing .sln alongside the MAUI app                   
+  2 - Use SQL Server 2022 Linux. Also, avoid SQL Edge because it has been       
+  retired                                                                       
+  3 - Use Dapper                                                                
+  4 - Parse the DEX in C#, then save with stored procedures SaveDEXMeter and    
+  SaveDEXLaneMeters                                                             
+  5 - Custom ASP.NET Core baisc auth handler                                    
+  6 - Yes                                                                       
+  7 - Use two tables:                                                           
+  DEXMeter                                                                      
+  Id                                                                            
+  Machine                                                                       
+  DEXDateTime                                                                   
+  MachineSerialNumber                                                           
+  ValueOfPaidVends                                                              
+  ReceivedAt                                                                    
+                                                                                
+  DEXLaneMeter                                                                  
+  Id                                                                            
+  DEXMeterId                                                                    
+  ProductIdentifier                                                             
+  Price                                                                         
+  NumberOfVends                                                                 
+  ValueOfPaidSales                                                              
+                                                                                
+  Add a foreign key from DEXLaneMeter.DEXMeterId to DEXMeter.Id. Add a unique   
+  constraint on Machine, DEXDateTime                                            
+                                                                                
+  8 - Use normal ASP.NET Core async handling plus connection-per-request SQL    
+  access. No queue or rate limiting needed. SQL Server can handle concurrent    
+  inserts. Use transactions around parent + lane inserts                        
+                                                                                
+  9 - Yes. Create the database in Docker SQL Server, run schema/procedure       
+  scripts, then create a .bak                                                   
+  10 - Use default ASP.NET Core ILogger with console logging                    
+
+⏺ Need check DEX files for DEXDateTime segment location before coding parser.
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ Found DEX structure:
+  - ID5*20231210*2310*53 → DEXDateTime (YYYYMMDD + HHMM)
+  - ID1 field 1 → MachineSerialNumber
+  - VA1 field 1 → ValueOfPaidVends
+  - PA1*<product>*<price> pairs with following PA2*<vends>*<sales>
+
+  Few more before scaffold:
+
+  1. Docker setup — provide docker-compose.yml at repo root (mssql-server 2022,
+  port 1433, sa password env)? You run it yourself with docker compose up -d?
+  2. sa password — pick strong default like VdiDex_DevP@ss1! or you supply?
+  3. DB name — VdiDex?
+  4. Connection string location — appsettings.json → ConnectionStrings:VdiDex?
+  5. Schema init — standalone .sql scripts under Database/ run manually via
+  sqlcmd + documented in README? Or auto-run on API startup if DB missing?
+  6. PA1/PA2 pairing — confirm model: one DEXLaneMeter row per PA1+PA2 pair.
+  Product=PA1.field1, Price=PA1.field2, Vends=PA2.field1, Sales=PA2.field2.
+  Correct?
+  7. Unique constraint violation — second POST same Machine+DEXDateTime. Return
+  409 Conflict or 200 idempotent?
+  8. TVP name — dbo.DEXLaneMeterType for lane rows?
+
+  Answer these, scaffold.
+
+✻ Crunched for 33s
+
+❯ 1 -  Yes, provide a docker-compose.yml at the repo root using SQL Server 2022 
+   on port 1433. I would not auto-run, documento docket compose up -d           
+  2 - Use VdiDex_DevP@ss1! Store it in docker-compose.yml for local dev only    
+  3 - Yes                                                                       
+  4 - Yes                                                                       
+  5 - Use standalone SQL scripts. Run them manually. Do not auto-create schema  
+  on API startup                                                                
+  6 - Yes                                                                       
+  7 - Return 409 Conflict. something like A DEX meter record already exists for 
+   this machine and DEX timestamp.                                              
+  8 - yes                                                                       
+
+⏺ Scaffolding now.
+
+⏺ Bash(cd /Users/binhara/Development/VdiDex && dotnet --list-sdks && dotnet new
+      webapi -n VdiDex.Api -f net9.0 -o VdiDex.Api --no-https false 2>&1 | tail
+      -20)
+  ⎿  9.0.308 [/usr/local/share/dotnet/sdk]
+     10.0.100 [/usr/local/share/dotnet/sdk]
+     The template "ASP.NET Core Web API" was created successfully.
+     … +8 lines (ctrl+o to expand)
+
+⏺ Bash(dotnet sln VdiDex.sln add VdiDex.Api/VdiDex.Api.csproj && cd VdiDex.Api
+      && dotnet add package Dapper && dotnet add package
+      Microsoft.Data.SqlClient 2>&1 | tail…)
+  ⎿  Project `VdiDex.Api/VdiDex.Api.csproj` added to the solution.
+     info : X.509 certificate chain validation will use the fallback certif
+     icate bundle at '/usr/local/share/dotnet/sdk/10.0.100/trustedroots/cod
+     … +49 lines (ctrl+o to expand)
+
+  Listed 1 directory (ctrl+o to expand)
+
+⏺ Bash(mkdir -p Interfaces Services Models Auth Endpoints Database && rm -f
+      VdiDex.Api.http)
+  ⎿  Done
+⏺ Write(VdiDex.Api/Models/DexMeter.cs)
+  ⎿  Wrote 12 lines to VdiDex.Api/Models/DexMeter.cs
+       2 namespace VdiDex.Api.Models;
+       3 public sealed class DexMeter
+       4 {
+       5     public long Id { get; set; }
+       6     public string Machine { get; set; } = string.Empty;
+       7     public DateTime DexDateTime { get; set; }
+       8     public string MachineSerialNumber { get; set; } = string.Emp
+         ty;
+       9     public long ValueOfPaidVends { get; set; }
+      10     public DateTime ReceivedAt { get; set; }
+     … +2 lines (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Models/DexLaneMeter.cs)
+  ⎿  Wrote 11 lines to VdiDex.Api/Models/DexLaneMeter.cs
+       2 namespace VdiDex.Api.Models;
+       3 public sealed class DexLaneMeter
+       4 {
+       5     public long Id { get; set; }
+       6     public long DexMeterId { get; set; }
+       7     public string ProductIdentifier { get; set; } = string.Empty
+         ;
+       8     public long Price { get; set; }
+       9     public long NumberOfVends { get; set; }
+      10     public long ValueOfPaidSales { get; set; }
+     … +1 line (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Models/BasicAuthCredentials.cs)
+  ⎿  Wrote 8 lines to VdiDex.Api/Models/BasicAuthCredentials.cs
+      1 namespace VdiDex.Api.Models;
+      2 
+      3 public sealed class BasicAuthCredentials
+      4 {
+      5     public const string SectionName = "BasicAuth";
+      6     public string Username { get; set; } = string.Empty;
+      7     public string Password { get; set; } = string.Empty;
+      8 }
+
+⏺ Write(VdiDex.Api/Models/DexSaveResult.cs)
+  ⎿  Wrote 9 lines to VdiDex.Api/Models/DexSaveResult.cs
+      1 namespace VdiDex.Api.Models;
+      2 
+      3 public enum DexSaveStatus
+      4 {
+      5     Created,
+      6     Conflict
+      7 }
+      8 
+      9 public sealed record DexSaveResult(DexSaveStatus Status, long Dex
+        MeterId, int LaneCount);
+
+⏺ Write(VdiDex.Api/Interfaces/IDexParser.cs)
+  ⎿  Wrote 8 lines to VdiDex.Api/Interfaces/IDexParser.cs
+      1 using VdiDex.Api.Models;
+      2 
+      3 namespace VdiDex.Api.Interfaces;
+      4 
+      5 public interface IDexParser
+      6 {
+      7     DexMeter Parse(string machine, string dexContent);
+      8 }
+
+⏺ Write(VdiDex.Api/Interfaces/IDexRepository.cs)
+  ⎿  Wrote 8 lines to VdiDex.Api/Interfaces/IDexRepository.cs
+      1 using VdiDex.Api.Models;
+      2 
+      3 namespace VdiDex.Api.Interfaces;
+      4 
+      5 public interface IDexRepository
+      6 {
+      7     Task<DexSaveResult> SaveAsync(DexMeter meter, CancellationTok
+        en cancellationToken = default);
+      8 }
+
+⏺ Write(VdiDex.Api/Services/DexParser.cs)
+  ⎿  Wrote 87 lines to VdiDex.Api/Services/DexParser.cs
+       1 using System.Globalization;
+       2 using VdiDex.Api.Interfaces;
+       3 using VdiDex.Api.Models;
+       4 
+       5 namespace VdiDex.Api.Services;
+       6 
+       7 public sealed class DexParser : IDexParser
+       8 {
+       9     public DexMeter Parse(string machine, string dexContent)
+      10     {
+     … +87 lines (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Services/DexRepository.cs)
+  ⎿  Wrote 90 lines to VdiDex.Api/Services/DexRepository.cs
+       1 using System.Data;
+       2 using Dapper;
+       3 using Microsoft.Data.SqlClient;
+       4 using VdiDex.Api.Interfaces;
+       5 using VdiDex.Api.Models;
+       6 
+       7 namespace VdiDex.Api.Services;
+       8 
+       9 public sealed class DexRepository : IDexRepository
+      10 {
+     … +96 lines (ctrl+o to expand)
+
+⏺ Fix the TVP mess — simpler Dapper TVP call.
+
+⏺ Write(VdiDex.Api/Services/DexRepository.cs)
+  ⎿  Added 13 lines, removed 12 lines
+      42                  commandType: CommandType.StoredProcedure,
+      43                  cancellationToken: cancellationToken));
+      44  
+      45 -            var lanes = BuildLaneTable(meterId, meter.Lanes);  
+      46 -            var laneParams = new DynamicParameters();          
+      47 -            laneParams.Add("@Lanes", lanes, DbType.Object);    
+      48 -            ((SqlMapper.ICustomQueryParameter)lanes.AsTableValu
+         -edParameter("dbo.DEXLaneMeterType"))                           
+      49 -                .AddParameter(laneParams.Parse(new { Lanes = la
+         -nes })!, "@Lanes");                                            
+      45 +            if (meter.Lanes.Count > 0)                         
+      46 +            {                                                  
+      47 +                var laneTable = BuildLaneTable(meterId, meter.L
+         +anes);                                                         
+      48 +                var parameters = new DynamicParameters();      
+      49 +                parameters.Add("@Lanes", laneTable.AsTableValue
+         +dParameter("dbo.DEXLaneMeterType"));                           
+      50  
+      51 -            var laneCount = await connection.ExecuteAsync(new C
+         -ommandDefinition(                                              
+      52 -                "dbo.SaveDEXLaneMeters",                       
+      53 -                new { Lanes = lanes.AsTableValuedParameter("dbo
+         -.DEXLaneMeterType") },                                         
+      54 -                transaction: transaction,                      
+      55 -                commandType: CommandType.StoredProcedure,      
+      56 -                cancellationToken: cancellationToken));        
+      51 +                await connection.ExecuteAsync(new CommandDefini
+         +tion(                                                          
+      52 +                    "dbo.SaveDEXLaneMeters",                   
+      53 +                    parameters,                                
+      54 +                    transaction: transaction,                  
+      55 +                    commandType: CommandType.StoredProcedure,  
+      56 +                    cancellationToken: cancellationToken));    
+      57 +            }                                                  
+      58  
+      59              await transaction.CommitAsync(cancellationToken);
+      60              return new DexSaveResult(DexSaveStatus.Created, met
+          erId, meter.Lanes.Count);
+     ...
+      62          catch (SqlException ex) when (ex.Number is SqlUniqueCon
+          straintError or SqlUniqueIndexError)
+      63          {
+      64              await transaction.RollbackAsync(cancellationToken);
+      64 -            _logger.LogWarning(ex, "Duplicate DEX meter for Mac
+         -hine {Machine} at {DexDateTime}", meter.Machine, meter.DexDateT
+         -ime);                                                          
+      65 +            _logger.LogWarning("Duplicate DEX meter for Machine
+         + {Machine} at {DexDateTime}", meter.Machine, meter.DexDateTime)
+         +;                                                              
+      66              return new DexSaveResult(DexSaveStatus.Conflict, 0,
+           0);
+      67          }
+      68          catch
+
+⏺ Write(VdiDex.Api/Auth/BasicAuthHandler.cs)
+  ⎿  Wrote 76 lines to VdiDex.Api/Auth/BasicAuthHandler.cs
+       2 using System.Text;ity.Claims;
+       3 using System.Text.Encodings.Web;
+       4 using Microsoft.AspNetCore.Authentication;
+       5 using Microsoft.Extensions.Options;
+       6 using VdiDex.Api.Models;
+       7 
+       8 namespace VdiDex.Api.Auth;
+       9 
+      10 public sealed class BasicAuthSchemeOptions : AuthenticationSchem
+         eOptions
+     … +82 lines (ctrl+o to expand)
+⏺ Write(VdiDex.Api/Endpoints/DexEndpoints.cs)
+  ⎿  Wrote 68 lines to VdiDex.Api/Endpoints/DexEndpoints.cs
+       2 using VdiDex.Api.Interfaces;vc;
+       3 using VdiDex.Api.Models;
+       4 
+       5 namespace VdiDex.Api.Endpoints;
+       6 
+       7 public static class DexEndpoints
+       8 {
+       9     public static IEndpointRouteBuilder MapDexEndpoints(this IEn
+         dpointRouteBuilder app)
+      10     {
+     … +66 lines (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Program.cs)
+  ⎿  Error writing file
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Program.cs)
+  ⎿  Added 19 lines, removed 32 lines
+       1 +using VdiDex.Api.Auth;                                         
+       2 +using VdiDex.Api.Endpoints;                                    
+       3 +using VdiDex.Api.Interfaces;                                   
+       4 +using VdiDex.Api.Models;                                       
+       5 +using VdiDex.Api.Services;                                     
+       6 +                                                               
+       7  var builder = WebApplication.CreateBuilder(args);
+       8  
+       3 -// Add services to the container.                              
+       4 -// Learn more about configuring OpenAPI at https://aka.ms/aspne
+         -t/openapi                                                      
+       5 -builder.Services.AddOpenApi();                                 
+       9 +builder.Services.Configure<BasicAuthCredentials>(              
+      10 +    builder.Configuration.GetSection(BasicAuthCredentials.Secti
+         +onName));                                                      
+      11  
+       7 -var app = builder.Build();                                     
+      12 +builder.Services                                               
+      13 +    .AddAuthentication(BasicAuthSchemeOptions.Scheme)          
+      14 +    .AddScheme<BasicAuthSchemeOptions, BasicAuthHandler>(BasicA
+         +uthSchemeOptions.Scheme, _ => { });                            
+      15  
+       9 -// Configure the HTTP request pipeline.                        
+      10 -if (app.Environment.IsDevelopment())                           
+      11 -{                                                              
+      12 -    app.MapOpenApi();                                          
+      13 -}                                                              
+      16 +builder.Services.AddAuthorization();                           
+      17  
+      15 -app.UseHttpsRedirection();                                     
+      18 +builder.Services.AddSingleton<IDexParser, DexParser>();        
+      19 +builder.Services.AddScoped<IDexRepository, DexRepository>();   
+      20  
+      17 -var summaries = new[]                                          
+      18 -{                                                              
+      19 -    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "B
+         -almy", "Hot", "Sweltering", "Scorching"                        
+      20 -};                                                             
+      21 +var app = builder.Build();                                     
+      22  
+      22 -app.MapGet("/weatherforecast", () =>                           
+      23 -{                                                              
+      24 -    var forecast =  Enumerable.Range(1, 5).Select(index =>     
+      25 -        new WeatherForecast                                    
+      26 -        (                                                      
+      27 -            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
+      28 -            Random.Shared.Next(-20, 55),                       
+      29 -            summaries[Random.Shared.Next(summaries.Length)]    
+      30 -        ))                                                     
+      31 -        .ToArray();                                            
+      32 -    return forecast;                                           
+      33 -})                                                             
+      34 -.WithName("GetWeatherForecast");                               
+      23 +app.UseAuthentication();                                       
+      24 +app.UseAuthorization();                                        
+      25  
+      36 -app.Run();                                                     
+      26 +app.MapDexEndpoints();                                         
+      27  
+      38 -record WeatherForecast(DateOnly Date, int TemperatureC, string?
+         - Summary)                                                      
+      39 -{                                                              
+      40 -    public int TemperatureF => 32 + (int)(TemperatureC / 0.5556
+         -);                                                             
+      41 -}                                                              
+      28 +app.Run();                                                     
+
+  Read 1 file (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/appsettings.json)
+  ⎿  Added 8 lines, removed 1 line
+       5        "Microsoft.AspNetCore": "Warning"
+       6      }
+       7    },
+       8 -  "AllowedHosts": "*"                                          
+       8 +  "AllowedHosts": "*",                                         
+       9 +  "ConnectionStrings": {                                       
+      10 +    "VdiDex": "Server=localhost,1433;Database=VdiDex;User Id=sa
+         +;Password=VdiDex_DevP@ss1!;TrustServerCertificate=True;Encrypt=
+         +True;"                                                         
+      11 +  },                                                           
+      12 +  "BasicAuth": {                                               
+      13 +    "Username": "vendsys",                                     
+      14 +    "Password": "NFsZGmHAGWJSZ#RuvdiV"                         
+      15 +  }                                                            
+      16  }
+
+⏺ Write(docker-compose.yml)
+  ⎿  Wrote 16 lines to docker-compose.yml
+       1 services:
+       2   sqlserver:
+       3     image: mcr.microsoft.com/mssql/server:2022-latest
+       4     container_name: vdidex-sqlserver
+       5     ports:
+       6       - "1433:1433"
+       7     environment:
+       8       ACCEPT_EULA: "Y"
+       9       MSSQL_SA_PASSWORD: "VdiDex_DevP@ss1!"
+      10       MSSQL_PID: "Developer"
+     … +6 lines (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Database/01_schema.sql)
+  ⎿  Wrote 53 lines to VdiDex.Api/Database/01_schema.sql
+       2 BEGIN_ID(N'VdiDex') IS NULL
+       3     CREATE DATABASE VdiDex;
+       4 END
+       5 GO
+       6 
+       7 USE VdiDex;
+       8 GO
+       9 
+      10 IF OBJECT_ID(N'dbo.DEXLaneMeter', N'U') IS NOT NULL DROP TABLE d
+         bo.DEXLaneMeter;
+     … +52 lines (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Database/02_procedures.sql)
+  ⎿  Wrote 35 lines to VdiDex.Api/Database/02_procedures.sql
+       2 GOE VdiDex;
+       3 
+       4 IF OBJECT_ID(N'dbo.SaveDEXMeter', N'P') IS NOT NULL DROP PROCEDU
+         RE dbo.SaveDEXMeter;
+       5 GO
+       6 
+       7 CREATE PROCEDURE dbo.SaveDEXMeter
+       8     @Machine              NVARCHAR(16),
+       9     @DEXDateTime          DATETIME2(0),
+      10     @MachineSerialNumber  NVARCHAR(64),
+     … +31 lines (ctrl+o to expand)
+
+⏺ Write(VdiDex.Api/Database/03_backup.sql)
+  ⎿  Wrote 7 lines to VdiDex.Api/Database/03_backup.sql
+      1 USE master;
+      2 GO
+      3 
+      4 BACKUP DATABASE VdiDex
+      5 TO DISK = N'/var/opt/mssql/backup/VdiDex.bak'
+      6 WITH FORMAT, INIT, NAME = N'VdiDex-Full', COMPRESSION;
+      7 GO
+
+⏺ Write(VdiDex.Api/Database/README.md)
+  ⎿  Wrote 42 lines to VdiDex.Api/Database/README.md
+       2 # VdiDex Database
+       3 Scripts to provision the VdiDex SQL Server 2022 database for loc
+         al dev.
+       4 
+       5 ## Prerequisites
+       6 
+       7 - Docker running
+       8 - `sqlcmd` (via `mssql-tools` or the `go-sqlcmd` binary)
+       9 
+      10 ## Bring up SQL Server
+     … +42 lines (ctrl+o to expand)
+
+⏺ Bash(dotnet build 2>&1 | tail -20)
+  ⎿    Determining projects to restore...
+       All projects are up-to-date for restore.
+       VdiDex.Api -> /Users/binhara/Development/VdiDex/VdiDex.Api/bin/Debug
+     … +7 lines (ctrl+o to expand)
+
+⏺ Bash(cd /Users/binhara/Development/VdiDex && dotnet build
+      VdiDex.Api/VdiDex.Api.csproj 2>&1 | tail -5 && dotnet build
+      VdiDex.Maui/VdiDex.Maui.csproj -f net10.0-macca…)
+  ⎿  Build succeeded.
+         0 Warning(s)
+         0 Error(s)
+     … +7 lines (ctrl+o to expand)
+
+⏺ Build clean, both projects.
+
+  API structure:
+
+  VdiDex.Api/
+  ├── Auth/            BasicAuthHandler.cs
+  ├── Endpoints/       DexEndpoints.cs
+  ├── Interfaces/      IDexParser.cs, IDexRepository.cs
+  ├── Models/          DexMeter.cs, DexLaneMeter.cs, BasicAuthCredentials.cs,
+  DexSaveResult.cs
+  ├── Services/        DexParser.cs, DexRepository.cs
+  ├── Database/        01_schema.sql, 02_procedures.sql, 03_backup.sql,
+  README.md
+  ├── Program.cs
+  └── appsettings.json
+  docker-compose.yml (repo root)
+
+  Design notes:
+
+  - Parser — segment-based, handles ID1 (serial), ID5 (DEX date+time
+  YYYYMMDD*HHMM), VA1 (paid vends), PA1/PA2 pairs → lanes.
+  - Repository — opens connection, begins transaction, calls dbo.SaveDEXMeter →
+  gets @@IDENTITY via OUTPUT INSERTED.Id, then calls dbo.SaveDEXLaneMeters with
+  TVP dbo.DEXLaneMeterType. Catches SQL errors 2627/2601 → returns Conflict.
+  - Auth — custom AuthenticationHandler<BasicAuthSchemeOptions>, fixed-time
+  compare, challenge emits WWW-Authenticate: Basic.
+  - Endpoint — POST /vdi-dex?machine=A, body = DEX text. Returns 201 Created,
+  400, 409, 401.
+  - Transaction — parent + lanes atomic per spec.
+
+  Next steps for you:
+
+  docker compose up -d
+  # wait ~10s for SQL to boot
+  sqlcmd -S localhost,1433 -U sa -P 'VdiDex_DevP@ss1!' -C -i
+  VdiDex.Api/Database/01_schema.sql
+  sqlcmd -S localhost,1433 -U sa -P 'VdiDex_DevP@ss1!' -C -i
+  VdiDex.Api/Database/02_procedures.sql
+  dotnet run --project VdiDex.Api
+
+  Then update VdiDex.Maui/Resources/Raw/appsettings.json → BaseUrl to match API
+  port (default http://localhost:5xxx from launchSettings.json, or set fixed
+  port if you want).
+
+  Want me to: (a) pin API port in launchSettings.json + update MAUI BaseUrl, (b)
+   add xUnit test project for parser, (c) generate .bak now (requires Docker
+  running)?
+✻ Crunched for 5m 53s
+
+❯ update maui baseurl                                                           
+
+  Read 2 files (ctrl+o to expand)
+
+⏺ Update(VdiDex.Maui/Resources/Raw/appsettings.json)
+  ⎿  Added 1 line, removed 1 line
+      1  {
+      2    "Api": {
+      3 -    "BaseUrl": "https://localhost:7001",                        
+      3 +    "BaseUrl": "https://localhost:7109",                        
+      4      "DexEndpoint": "/vdi-dex",
+      5      "Username": "vendsys",
+      6      "Password": "NFsZGmHAGWJSZ#RuvdiV"
+
+⏺ Updated VdiDex.Maui/Resources/Raw/appsettings.json → BaseUrl =
+  https://localhost:7109 (matches API https profile).
+
+  Caveat Mac simulators/devices:
+  - iOS/Android simulators can't reach localhost on host. Android emulator uses
+  10.0.2.2; iOS simulator uses localhost fine; physical device needs LAN IP.
+  - Self-signed HTTPS cert → run dotnet dev-certs https --trust on host.
+  Simulators may still reject — use http://localhost:5251 for dev if HTTPS trust
+   blocks.
+
+  Want http profile instead? Swap to http://localhost:5251.
+
+❯ /export                                                                       
+  ⎿  Conversation exported to: /Users/binhara/Development/VdiDex/2026-04-22-1152
+     18-APi-and-Database-implementation.txt
+
+❯ Validate that machine can only be A or B. Right now every value passed in     
+  query pass. The document explicit says either A or B                          
+
+⏺ Validating at endpoint + DB CHECK constraint.
+
+⏺ Update(VdiDex.Api/Endpoints/DexEndpoints.cs)
+  ⎿  Added 3 lines
+      26          if (string.IsNullOrWhiteSpace(machine))
+      27              return Results.BadRequest(new { error = "Query para
+          meter 'machine' is required." });
+      28  
+      29 +        if (!IsValidMachine(machine))                          
+      30 +            return Results.BadRequest(new { error = "Query para
+         +meter 'machine' must be 'A' or 'B'." });                       
+      31 +                                                               
+      32          string dex;
+      33          using (var reader = new StreamReader(request.Body))
+      34          {
+
+⏺ Update(VdiDex.Api/Endpoints/DexEndpoints.cs)
+  ⎿  Added 4 lines
+      15          return app;
+      16      }
+      17  
+      18 +    private static readonly HashSet<string> AllowedMachines = n
+         +ew(StringComparer.Ordinal) { "A", "B" };                       
+      19 +                                                               
+      20 +    private static bool IsValidMachine(string machine) => Allow
+         +edMachines.Contains(machine);                                  
+      21 +                                                               
+      22      private static async Task<IResult> HandleAsync(
+      23          [FromQuery] string machine,
+      24          HttpRequest request,
+
+⏺ Add DB CHECK constraint for defense-in-depth.
+
+⏺ Update(VdiDex.Api/Database/01_schema.sql)
+  ⎿  Added 2 lines, removed 1 line
+      14  CREATE TABLE dbo.DEXMeter
+      15  (
+      16      Id                   BIGINT IDENTITY(1,1) NOT NULL CONSTRAI
+          NT PK_DEXMeter PRIMARY KEY,
+      17 -    Machine              NVARCHAR(16)         NOT NULL,        
+      17 +    Machine              NVARCHAR(16)         NOT NULL         
+      18 +        CONSTRAINT CK_DEXMeter_Machine CHECK (Machine IN (N'A',
+         + N'B')),                                                       
+      19      DEXDateTime          DATETIME2(0)         NOT NULL,
+      20      MachineSerialNumber  NVARCHAR(64)         NOT NULL,
+      21      ValueOfPaidVends     BIGINT               NOT NULL,
+
+⏺ Bash(dotnet build VdiDex.Api/VdiDex.Api.csproj 2>&1 | tail -5)
+  ⎿  Interrupted · What should Claude do instead?
